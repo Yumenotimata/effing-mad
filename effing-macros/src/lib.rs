@@ -19,10 +19,17 @@ fn quote_do_pinned(e: &Expr) -> Expr {
             let mut injection = Coproduct::inject(::effing_mad::injection::Begin);
             loop {
                 let pinned = unsafe { ::core::pin::Pin::new_unchecked(&mut gen) };
-                let res = pinned.resume(injection);
+                let frame = ::effing_mad::injection::Frame {
+                    injection,
+                    evidence: __effing_evidence.clone(),
+                };
+                let res = pinned.resume(frame);
                 match res {
-                    CoroutineState::Yielded(effs) =>
-                        injection = (yield effs.embed()).subset().ok().unwrap(),
+                    CoroutineState::Yielded(effs) => {
+                        let frame = yield effs.embed();
+                        injection = frame.injection.subset().ok().unwrap();
+                        __effing_evidence = frame.evidence;
+                    }
                     CoroutineState::Complete(v) => break v,
                 }
             }
@@ -39,10 +46,17 @@ fn quote_do_unpin(e: &Expr) -> Expr {
             let mut injection = Coproduct::inject(::effing_mad::injection::Begin);
             loop {
                 let pinned = ::core::pin::Pin::new(&mut gen);
-                let res = pinned.resume(injection);
+                let frame = ::effing_mad::injection::Frame {
+                    injection,
+                    evidence: __effing_evidence.clone(),
+                };
+                let res = pinned.resume(frame);
                 match res {
-                    CoroutineState::Yielded(effs) =>
-                        injection = (yield effs.embed()).subset().ok().unwrap(),
+                    CoroutineState::Yielded(effs) => {
+                        let frame = yield effs.embed();
+                        injection = frame.injection.subset().ok().unwrap();
+                        __effing_evidence = frame.evidence;
+                    }
                     CoroutineState::Complete(v) => break v,
                 }
             }
@@ -89,7 +103,9 @@ impl syn::visit_mut::VisitMut for EffectfulBodyVisitor {
                     {
                         let effect = { #expr };
                         let marker = ::effing_mad::macro_impl::mark(&effect);
-                        let injs = yield ::effing_mad::frunk::Coproduct::inject(effect);
+                        let frame = yield ::effing_mad::frunk::Coproduct::inject(effect);
+                        __effing_evidence = frame.evidence;
+                        let injs = frame.injection;
                         ::effing_mad::macro_impl::get_inj(injs, marker).unwrap()
                     }
                 };
@@ -149,11 +165,14 @@ pub fn effectful(args: TokenStream, item: TokenStream) -> TokenStream {
         constness,
         unsafety,
         ident,
-        generics,
+        mut generics,
         inputs,
         output,
         ..
     } = sig;
+    generics
+        .params
+        .push(parse_quote!(Evidence: ::core::clone::Clone + ::core::fmt::Debug));
     let return_type = match output {
         ReturnType::Default => quote!(()),
         ReturnType::Type(_r_arrow, ref ty) => ty.to_token_stream(),
@@ -178,12 +197,20 @@ pub fn effectful(args: TokenStream, item: TokenStream) -> TokenStream {
         #vis #constness #unsafety
         fn #ident #generics(#inputs)
         -> impl ::core::ops::Coroutine<
-            <#yield_type as ::effing_mad::injection::EffectList>::Injections,
+            ::effing_mad::injection::Frame<
+                <#yield_type as ::effing_mad::injection::EffectList>::Injections,
+                Evidence
+            >,
             Yield = #yield_type,
             Return = #return_type
         > #clone_bound {
             #[coroutine]
-            #maybe_static move |_begin: <#yield_type as ::effing_mad::injection::EffectList>::Injections| {
+            #maybe_static move |frame: ::effing_mad::injection::Frame<
+                <#yield_type as ::effing_mad::injection::EffectList>::Injections,
+                Evidence
+            >| {
+                let mut __effing_evidence = frame.evidence;
+                let _begin = frame.injection;
                 #block
             }
         }

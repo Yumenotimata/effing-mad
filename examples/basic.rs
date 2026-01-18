@@ -75,5 +75,6 @@ fn combined<'a>() {
     // effects.
     yield Log(format!("I know your password! It's {mischief}").into());
     yield Log("I'm going to do evil things and you can't stop me!".into());
+    println!("{:?}", __effing_evidence);
     simple().do_;
 }

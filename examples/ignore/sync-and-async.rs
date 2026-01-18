@@ -45,8 +45,8 @@ async fn interesting_and_useful() {
         }
     };
 
-    let req1 = handle_group_async(example(), handler);
-    let req2 = handle_group_async(example(), handler);
+    let req1 = handle_group_async(example::<effing_mad::injection::Evidence>(), handler);
+    let req2 = handle_group_async(example::<effing_mad::injection::Evidence>(), handler);
 
     // asyncified effectful functions can be composed in the same ways as traditional futures
     let (res1, res2) = futures::future::join(req1, req2).await;

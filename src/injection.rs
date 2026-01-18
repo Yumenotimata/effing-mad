@@ -54,3 +54,15 @@ impl EffectList for CNil {
 impl<E: Effect, Es: EffectList> EffectList for Coproduct<E, Es> {
     type Injections = Coproduct<Tagged<E::Injection, E>, Es::Injections>;
 }
+
+/// A frame containing an injection and evidence.
+pub struct Frame<T, E> {
+    /// The injection value.
+    pub injection: T,
+    /// The evidence value.
+    pub evidence: E,
+}
+
+/// The base evidence type.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Evidence;

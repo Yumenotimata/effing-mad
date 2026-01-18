@@ -54,7 +54,10 @@ impl<T> Iterator<T> {
     fn into_rust_iterator<G>(g: G) -> impl std::iter::Iterator<Item = T>
     where
         G: Coroutine<
-            <Coprod!(yield_next<T>) as EffectList>::Injections,
+            effing_mad::injection::Frame<
+                <Coprod!(yield_next<T>) as EffectList>::Injections,
+                effing_mad::injection::Evidence,
+            >,
             Yield = Coprod!(yield_next<T>),
             Return = (),
         >,
@@ -67,7 +70,10 @@ impl<T> Iterator<T> {
         impl<T, G> std::iter::Iterator for RealIterator<T, G>
         where
             G: Coroutine<
-                <Coprod!(yield_next<T>) as EffectList>::Injections,
+                effing_mad::injection::Frame<
+                    <Coprod!(yield_next<T>) as EffectList>::Injections,
+                    effing_mad::injection::Evidence,
+                >,
                 Yield = Coprod!(yield_next<T>),
                 Return = (),
             >,
@@ -75,7 +81,10 @@ impl<T> Iterator<T> {
             type Item = T;
 
             fn next(&mut self) -> Option<Self::Item> {
-                match self.gen.as_mut().resume(Coproduct::Inl(Tagged::new(()))) {
+                match self.gen.as_mut().resume(effing_mad::injection::Frame {
+                    injection: Coproduct::Inl(Tagged::new(())),
+                    evidence: effing_mad::injection::Evidence,
+                }) {
                     CoroutineState::Yielded(Coproduct::Inl(yield_next(next, ..))) => Some(next),
                     CoroutineState::Yielded(Coproduct::Inr(never)) => match never {},
                     CoroutineState::Complete(()) => None,
