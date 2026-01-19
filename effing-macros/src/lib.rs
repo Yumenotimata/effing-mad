@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
 use syn::{
@@ -379,6 +381,7 @@ pub fn effects(input: TokenStream) -> TokenStream {
     .into()
 }
 
+#[derive(Debug, Clone)]
 struct HandlerArm {
     pat: Pat,
     body: Expr,
@@ -540,6 +543,50 @@ pub fn handler(input: TokenStream) -> TokenStream {
         PathArguments::Parenthesized(_) => panic!("stop that"),
     };
 
+    // println!("{:#?}", arms);
+    // std::process::exit(0);
+
+    // let mut arm_lambdas = HashMap::new();
+    let mut arm_lambdas = quote! {};
+    for arm in arms.clone() {
+        let eff_ty = match &arm.pat {
+            // struct name on its own gets parsed as ident
+            Pat::Ident(ident) => quote!(#ident),
+            Pat::Path(path) => quote!(#path),
+            Pat::TupleStruct(PatTupleStruct { path, .. }) => quote!(#path),
+            p => panic!("invalid pattern in handler: {p:?}"),
+        };
+        let HandlerArm { pat, mut body } = arm;
+            syn::visit_mut::visit_expr_mut(
+            &mut FixControlFlow {
+                eff_ty: &eff_ty,
+                is_shorthand,
+            },
+            &mut body,
+        );
+        let handler_lam = quote! {
+            let t = |effs: ::effing_mad::frunk::Coproduct< #eff_ty #generics , _ >| {
+                // let #pat = effs;
+                #body
+            };
+            // let t = |a: String| {
+            
+            //     #body
+            // };
+        };
+        arm_lambdas = quote! {
+            #handler_lam;
+            // #arm_lambdas;
+            // , 
+            // #eff_ty => #handler_lam
+        };
+        // arm_lambdas.insert(eff_ty.to_string(), handler_lam);
+    }
+    // let arm_lambdas = quote! { #arm_lambdas };
+
+    // println!("DEBUG: arm_lambdas = {:#?}", arm_lambdas);
+    // std::process::exit(0);
+
     let mut matcher = quote! { match effs {} };
     for arm in arms {
         let HandlerArm { pat, mut body } = arm;
@@ -604,12 +651,20 @@ pub fn handler(input: TokenStream) -> TokenStream {
         quote!(<#group as ::effing_mad::EffectGroup>::Effects)
     };
     quote! {
-        #moveness |effs: #effs_ty| #asyncness {
-            let __effing_inj = #matcher;
-            // if the handler unconditionally breaks then this line is unreachable, but we
-            // don't want to see a warning for it.
-            #[allow(unreachable_code)]
-            ::core::ops::ControlFlow::<_, _>::Continue(__effing_inj)
+        {
+        // {
+            // #arm_lambdas;
+        // };
+            {
+                #arm_lambdas;
+            };
+            #moveness |effs: #effs_ty| #asyncness {
+                let __effing_inj = #matcher;
+                // if the handler unconditionally breaks then this line is unreachable, but we
+                // don't want to see a warning for it.
+                #[allow(unreachable_code)]
+                ::core::ops::ControlFlow::<_, _>::Continue(__effing_inj)
+            }
         }
     }
     .into()

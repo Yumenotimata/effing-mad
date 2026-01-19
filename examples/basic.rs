@@ -15,7 +15,7 @@
 use effing_mad::{effectful, handle, handler, Effect};
 
 fn main() {
-    let cancelled = handle(combined(), handler!(Cancel => break));
+    let cancelled = handle(combined(), handler!(Cancel => {println!("cancelled!"); break}));
     let logged = handle(cancelled, handler!(Log(msg) => println!("log: {msg}")));
     let filesystemed = handle(
         logged,
