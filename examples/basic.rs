@@ -11,30 +11,37 @@
 
 #![feature(coroutines)]
 #![feature(coroutine_trait)]
+#![feature(alloc)]
 
+extern crate alloc;
+
+use alloc::vec::Vec;
 use effing_mad::{effectful, handle, handler, Effect};
 
 fn main() {
-    let cancelled = handle(combined(), handler!(Cancel => {println!("cancelled!"); break}));
-    let logged = handle(cancelled, handler!(Log(msg) => println!("log: {msg}")));
-    let filesystemed = handle(
-        logged,
-        handler!(FileRead(name) => {
-            assert_eq!(name, "~/my passwords.txt");
-            "monadtransformerssuck".into()
-        }),
-    );
+    let cancelled = handle(combined(), handler!(Log(msg) => println!("cancelled! {:?}", msg)));
+    // let logged = handle(cancelled, handler!(Log(msg) => println!("log: {msg}")));
+    // let filesystemed = handle(
+    //     logged,
+    //     handler!(FileRead(name) => {
+    //         assert_eq!(name, "~/my passwords.txt");
+    //         "monadtransformerssuck".into()
+    //     }),
+    // );
 
-    effing_mad::run(filesystemed);
+    // effing_mad::run(filesystemed);
 }
 
+#[derive(Clone, Copy, Debug)]
 struct Cancel;
 
 impl Effect for Cancel {
     /// Resuming an effectful function after it has cancelled is impossible.
-    type Injection = effing_mad::Never;
+    type Injection = ();
 }
 
+
+#[derive(Clone, Debug)]
 struct Log<'a>(std::borrow::Cow<'a, str>);
 
 impl<'a> Effect for Log<'a> {
@@ -42,6 +49,8 @@ impl<'a> Effect for Log<'a> {
     type Injection = ();
 }
 
+
+#[derive(Clone, Debug)]
 struct FileRead(String);
 
 impl Effect for FileRead {
@@ -67,14 +76,14 @@ fn simple<'a>() {
 // This function demonstrates how effect handlers can pass values back into the effectful function,
 // and how the `do_` operator can be used to call effectful functions, as long as the callee has a
 // subset of the caller's effects.
-#[effectful(Cancel, Log<'a>, FileRead)]
+#[effectful(Log<'a>)]
 fn combined<'a>() {
-    let mischief = yield FileRead("~/my passwords.txt".into());
+    // let mischief = yield FileRead("~/my passwords.txt".into());
     // this is why Log has to use Cow - we can't yield something referencing local content...
     // ...for some reason. I sure hope that doesn't foil my plans to take over Rust with algebraic
     // effects.
-    yield Log(format!("I know your password! It's {mischief}").into());
+    yield Log(format!("I know your password! It's").into());
     yield Log("I'm going to do evil things and you can't stop me!".into());
-    println!("{:?}", __effing_evidence);
-    simple().do_;
+    // println!("{:?}", __effing_evidence);
+    // simple().do_;
 }

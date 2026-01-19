@@ -56,13 +56,13 @@ impl<E: Effect, Es: EffectList> EffectList for Coproduct<E, Es> {
 }
 
 /// A frame containing an injection and evidence.
-pub struct Frame<T, E> {
+pub struct Frame<T> {
     /// The injection value.
     pub injection: T,
     /// The evidence value.
-    pub evidence: E,
+    pub evidence: Evidence,
 }
 
 /// The base evidence type.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Evidence;

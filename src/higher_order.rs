@@ -16,18 +16,18 @@ pub struct OptionMapEff<G, Effs, U, Ev> {
     _ev: PhantomData<fn(Ev)>,
 }
 
-impl<G, Effs, U, Ev> Coroutine<crate::injection::Frame<Effs::Injections, Ev>>
+impl<G, Effs, U, Ev> Coroutine<crate::injection::Frame<Effs::Injections>>
     for OptionMapEff<G, Effs, U, Ev>
 where
     Effs: EffectList,
-    G: Coroutine<crate::injection::Frame<Effs::Injections, Ev>, Yield = Effs, Return = U>,
+    G: Coroutine<crate::injection::Frame<Effs::Injections>, Yield = Effs, Return = U>,
 {
     type Yield = Effs;
     type Return = Option<U>;
 
     fn resume(
         self: Pin<&mut Self>,
-        frame: crate::injection::Frame<Effs::Injections, Ev>,
+        frame: crate::injection::Frame<Effs::Injections>,
     ) -> CoroutineState<Self::Yield, Self::Return> {
         unsafe {
             match &mut self.get_unchecked_mut().g {
@@ -52,14 +52,14 @@ pub trait OptionExt<T>: Sized {
     fn map_eff<Effs, G, Ev>(self, g: impl FnOnce(T) -> G) -> OptionMapEff<G, Effs, G::Return, Ev>
     where
         Effs: EffectList,
-        G: Coroutine<crate::injection::Frame<Effs::Injections, Ev>, Yield = Effs>;
+        G: Coroutine<crate::injection::Frame<Effs::Injections>, Yield = Effs>;
 }
 
 impl<T> OptionExt<T> for Option<T> {
     fn map_eff<Effs, G, Ev>(self, g: impl FnOnce(T) -> G) -> OptionMapEff<G, Effs, G::Return, Ev>
     where
         Effs: EffectList,
-        G: Coroutine<crate::injection::Frame<Effs::Injections, Ev>, Yield = Effs>,
+        G: Coroutine<crate::injection::Frame<Effs::Injections>, Yield = Effs>,
     {
         OptionMapEff {
             g: self.map(g),
@@ -78,19 +78,19 @@ pub struct ResultMapEff<G, E, Effs, U, Ev> {
     _ev: PhantomData<fn(Ev)>,
 }
 
-impl<G, E, Effs, U, Ev> Coroutine<crate::injection::Frame<Effs::Injections, Ev>>
+impl<G, E, Effs, U, Ev> Coroutine<crate::injection::Frame<Effs::Injections>>
     for ResultMapEff<G, E, Effs, U, Ev>
 where
     E: Unpin,
     Effs: EffectList,
-    G: Coroutine<crate::injection::Frame<Effs::Injections, Ev>, Yield = Effs, Return = U>,
+    G: Coroutine<crate::injection::Frame<Effs::Injections>, Yield = Effs, Return = U>,
 {
     type Yield = Effs;
     type Return = Result<U, E>;
 
     fn resume(
         self: Pin<&mut Self>,
-        frame: crate::injection::Frame<Effs::Injections, Ev>,
+        frame: crate::injection::Frame<Effs::Injections>,
     ) -> CoroutineState<Self::Yield, Self::Return> {
         unsafe {
             let g = &mut self.get_unchecked_mut().g;
@@ -119,19 +119,19 @@ pub struct ResultMapErrEff<G, T, Effs, U, Ev> {
     _ev: PhantomData<fn(Ev)>,
 }
 
-impl<G, T, Effs, U, Ev> Coroutine<crate::injection::Frame<Effs::Injections, Ev>>
+impl<G, T, Effs, U, Ev> Coroutine<crate::injection::Frame<Effs::Injections>>
     for ResultMapErrEff<G, T, Effs, U, Ev>
 where
     T: Unpin,
     Effs: EffectList,
-    G: Coroutine<crate::injection::Frame<Effs::Injections, Ev>, Yield = Effs, Return = U>,
+    G: Coroutine<crate::injection::Frame<Effs::Injections>, Yield = Effs, Return = U>,
 {
     type Yield = Effs;
     type Return = Result<T, U>;
 
     fn resume(
         self: Pin<&mut Self>,
-        frame: crate::injection::Frame<Effs::Injections, Ev>,
+        frame: crate::injection::Frame<Effs::Injections>,
     ) -> CoroutineState<Self::Yield, Self::Return> {
         unsafe {
             let g = &mut self.get_unchecked_mut().g;
@@ -163,7 +163,7 @@ pub trait ResultExt<T, E>: Sized {
     ) -> ResultMapEff<G, E, Effs, G::Return, Ev>
     where
         Effs: EffectList,
-        G: Coroutine<crate::injection::Frame<Effs::Injections, Ev>, Yield = Effs>;
+        G: Coroutine<crate::injection::Frame<Effs::Injections>, Yield = Effs>;
 
     /// Transforms the value inside a [`Result::Err`] with some effects.
     ///
@@ -174,14 +174,14 @@ pub trait ResultExt<T, E>: Sized {
     ) -> ResultMapErrEff<G, T, Effs, G::Return, Ev>
     where
         Effs: EffectList,
-        G: Coroutine<crate::injection::Frame<Effs::Injections, Ev>, Yield = Effs>;
+        G: Coroutine<crate::injection::Frame<Effs::Injections>, Yield = Effs>;
 }
 
 impl<T, E> ResultExt<T, E> for Result<T, E> {
     fn map_eff<Effs, G, Ev>(self, g: impl FnOnce(T) -> G) -> ResultMapEff<G, E, Effs, G::Return, Ev>
     where
         Effs: EffectList,
-        G: Coroutine<crate::injection::Frame<Effs::Injections, Ev>, Yield = Effs>,
+        G: Coroutine<crate::injection::Frame<Effs::Injections>, Yield = Effs>,
     {
         ResultMapEff {
             g: Some(self.map(g)),
@@ -197,7 +197,7 @@ impl<T, E> ResultExt<T, E> for Result<T, E> {
     ) -> ResultMapErrEff<G, T, Effs, G::Return, Ev>
     where
         Effs: EffectList,
-        G: Coroutine<crate::injection::Frame<Effs::Injections, Ev>, Yield = Effs>,
+        G: Coroutine<crate::injection::Frame<Effs::Injections>, Yield = Effs>,
     {
         ResultMapErrEff {
             g: Some(self.map_err(g)),

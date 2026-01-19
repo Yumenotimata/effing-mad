@@ -63,6 +63,8 @@ use frunk::{
 pub use effing_macros::{effectful, effects, handler};
 use injection::{Begin, EffectList, Tagged};
 
+use crate::injection::Evidence;
+
 /// An uninhabited type that can never be constructed.
 ///
 /// Substitutes for `!` until that is stabilised.
@@ -72,14 +74,15 @@ pub enum Never {}
 ///
 /// Effectful computations are coroutines, but if they have no effects, it is guaranteed that they
 /// will never yield. Therefore they can be run by resuming them once. This function does that.
-pub fn run<F, R>(mut f: F) -> R
+pub fn run<F, R>(f: F) -> R
 where
     F: Coroutine<
-        injection::Frame<Coproduct<Begin, CNil>, injection::Evidence>,
+        injection::Frame<Coproduct<Begin, CNil>>,
         Yield = CNil,
         Return = R,
     >,
 {
+    let mut f = f;
     let pinned = pin!(f);
     match pinned.resume(injection::Frame {
         injection: Coproduct::Inl(Begin),
@@ -114,12 +117,12 @@ impl<E: Effect> EffectGroup for E {
 
 /// Create a new effectful computation by applying a "pure" function to the return value of an
 /// existing computation.
-pub fn map<E, I, T, U, Ev>(
-    g: impl Coroutine<injection::Frame<I, Ev>, Yield = E, Return = T>,
+pub fn map<E, I, T, U>(
+    g: impl Coroutine<injection::Frame<I>, Yield = E, Return = T>,
     f: impl FnOnce(T) -> U,
-) -> impl Coroutine<injection::Frame<I, Ev>, Yield = E, Return = U> {
+) -> impl Coroutine<injection::Frame<I>, Yield = E, Return = U> {
     #[coroutine]
-    static move |mut frame: injection::Frame<I, Ev>| {
+    static move |mut frame: injection::Frame<I>| {
         let mut pinned = pin!(g);
         loop {
             match pinned.as_mut().resume(frame) {
@@ -152,12 +155,11 @@ pub fn handle<
     BeginIndex,
     InjIndex,
     InjsIndices,
-    EmbedIndices,
-    Ev,
+    EmbedIndices
 >(
     g: G,
     mut handler: impl FnMut(E) -> ControlFlow<R, E::Injection>,
-) -> impl Coroutine<injection::Frame<PostIs, Ev>, Yield = PostEs, Return = R>
+) -> impl Coroutine<injection::Frame<PostIs>, Yield = PostEs, Return = R>
 where
     E: Effect,
     Coprod!(Tagged<E::Injection, E>, Begin): CoproductEmbedder<PreIs, InjsIndices>,
@@ -165,8 +167,7 @@ where
     PostEs: EffectList<Injections = PostIs>,
     PreIs: CoprodInjector<Begin, BeginIndex> + CoprodInjector<Tagged<E::Injection, E>, InjIndex>,
     PostIs: CoproductEmbedder<PreIs, EmbedIndices>,
-    G: Coroutine<injection::Frame<PreIs, Ev>, Yield = PreEs, Return = R>,
-    Ev: Clone,
+    G: Coroutine<injection::Frame<PreIs>, Yield = PreEs, Return = R>,
 {
     handle_group(g, move |effs| match effs {
         Coproduct::Inl(eff) => match handler(eff) {
@@ -204,11 +205,10 @@ pub fn handle_group<
     InjsIndices,
     BeginIndex,
     EmbedIndices,
-    Ev,
 >(
     g: G,
     mut handler: impl FnMut(Es) -> ControlFlow<R, Is>,
-) -> impl Coroutine<injection::Frame<PostIs, Ev>, Yield = PostEs, Return = R>
+) -> impl Coroutine<injection::Frame<PostIs>, Yield = PostEs, Return = R>
 where
     Es: EffectList<Injections = Is>,
     Is: CoproductEmbedder<PreIs, InjsIndices>,
@@ -216,11 +216,10 @@ where
     PostEs: EffectList<Injections = PostIs>,
     PreIs: CoprodInjector<Begin, BeginIndex>,
     PostIs: CoproductEmbedder<PreIs, EmbedIndices>,
-    G: Coroutine<injection::Frame<PreIs, Ev>, Yield = PreEs, Return = R>,
-    Ev: Clone,
+    G: Coroutine<injection::Frame<PreIs>, Yield = PreEs, Return = R>,
 {
     #[coroutine]
-    static move |frame: injection::Frame<PostIs, Ev>| {
+    static move |frame: injection::Frame<PostIs>| {
         let injection::Frame {
             injection: _,
             mut evidence,
@@ -264,74 +263,24 @@ where
 /// because it is impossible to construct a computation that is both asynchronous and effectful.
 ///
 /// For more flexible interactions with Futures, see [`effects::future`].
-pub async fn handle_async<Eff, G, Fut, Ev>(g: G, mut handler: impl FnMut(Eff) -> Fut) -> G::Return
+pub async fn handle_async<Eff, G, Fut>(g: G, mut handler: impl FnMut(Eff) -> Fut) -> G::Return
 where
     Eff: Effect,
     G: Coroutine<
-        injection::Frame<Coprod!(Tagged<Eff::Injection, Eff>, Begin), Ev>,
+        injection::Frame<Coprod!(Tagged<Eff::Injection, Eff>, Begin)>,
         Yield = Coprod!(Eff),
     >,
     Fut: Future<Output = ControlFlow<G::Return, Eff::Injection>>,
-    Ev: Default + Clone,
 {
     let mut injs = Coproduct::inject(Begin);
     let mut pinned = pin!(g);
-    // Async handler assumes we are at the top level or can't receive evidence from yield?
-    // Wait, handle_async normally runs the whole computation.
-    // It consumes G.
-    // What evidence does it pass to G?
-    // It takes G, but who calls handle_async?
-    // It's an async fn.
-    // It creates the loop itself.
-    // It needs access to Evidence to pass to G.
-    // But `handle_async` doesn't take Evidence argument!
-    // It probably should if we want to pass it.
-    // Or if handle_async is "top level" or "leaf" in terms of effects?
-    // It handles the last effect.
-    // The instructions say "handle the last effect".
-    // So usually valid only if no other effects?
-    // Wait, `handle_async` is an `async fn`. It returns `G::Return`.
-    // It doesn't return a Coroutine.
-    // So it drives G to completion.
-    // It has to provide evidence.
-    // If we assume default evidence `()`?
-    // Or add `evidence: Ev` argument?
-    // The user instruction: "First, enable functions... to accept an evidence argument."
-    // `handle_async` is not an effect-generating function, it's a handler-runner.
-    // It runs a generator.
-    // If the generator requires evidence, `handle_async` must provide it.
-    // I'll add `evidence: Ev` argument to `handle_async`.
-    // Wait, this changes `handle_async` signature.
-    // Existing code `handle_async(g, handler)` will break.
-    // But G now requires Coroutine<Frame<..., Ev>>.
-    // If Ev is `()`, maybe I can default `evidence`? No default args in Rust.
-    // I'll use `()` for now in the body if I don't add argument?
-    // But then G must accept `()`.
-    // If G expects something else, it won't work.
-    // So I MUST add `evidence: Ev` to `handle_async`.
-    // And `handle_group_async` too.
-    // But wait, `basic.rs` doesn't use `handle_async`.
-    // If I add an argument, I break public API.
-    // Is there a way to avoid it?
-    // Maybe `handle_async` requires `G: Coroutine<Frame<..., ()>>`?
-    // If G requires generic Ev, it can match `()`.
-    // But if G requires specific Ev (from upstream handlers), `handle_async` can't be used unless we have that Ev.
-    // Since `handle_async` is usually at the end of the chain (converting to async), maybe `()` is correct if "handling the last effect" means we are done effect-handling?
-    // But `handle_async` handles *one* effect. Others might have been handled before.
-    // The "Evidence" accumulates.
-    // So the provided Ev should be the accumulator.
-    // If `handle_async` is called, it means we are running it.
-    // So we should have the evidence.
-    // I'll add the argument.
-    // Wait, `handle_async` implementation:
-    let evidence: Ev = unsafe { core::mem::zeroed() }; // Hack? No.
-                                                       // I'll add the argument. It's a breaking change but necessary for the task.
+    // let evidence = Ev::default();
                                                        // Actually, maybe I can make `Ev` default to `()` and not ask for it?
                                                        // Only if `Ev` implements `Default`.
                                                        // `let evidence = Ev::default()`.
                                                        // I'll add `Ev: Default`.
                                                        // This seems reasonable.
-    let mut evidence = Ev::default();
+    let mut evidence = Evidence::default();
     loop {
         match pinned.as_mut().resume(injection::Frame {
             injection: injs,
@@ -362,20 +311,20 @@ where
 /// because it is impossible to construct a computation that is both asynchronous and effectful.
 ///
 /// For more flexible interactions with Futures, see [`effects::future`].
-pub async fn handle_group_async<G, Fut, Es, Is, BeginIndex, Ev>(
-    mut g: G,
+pub async fn handle_group_async<G, Fut, Es, Is, BeginIndex>(
+    g: G,
     mut handler: impl FnMut(Es) -> Fut,
 ) -> G::Return
 where
     Es: EffectList<Injections = Is>,
     Is: CoprodInjector<Begin, BeginIndex>,
-    G: Coroutine<injection::Frame<Is, Ev>, Yield = Es>,
+    G: Coroutine<injection::Frame<Is>, Yield = Es>,
     Fut: Future<Output = ControlFlow<G::Return, Is>>,
-    Ev: Default + Clone,
 {
     let mut injs = Is::inject(Begin);
+    let mut g = g;
     let mut pinned = pin!(g);
-    let mut evidence = Ev::default();
+    let evidence = Evidence::default();
     loop {
         match pinned.as_mut().resume(injection::Frame {
             injection: injs,
@@ -419,14 +368,13 @@ pub fn transform<
     EmbedIndices1,
     EmbedIndices2,
     EmbedIndices3,
-    Ev,
 >(
     g: G1,
     mut handler: impl FnMut(E) -> H,
-) -> impl Coroutine<injection::Frame<PostIs, Ev>, Yield = PostEs, Return = R>
+) -> impl Coroutine<injection::Frame<PostIs>, Yield = PostEs, Return = R>
 where
     E: Effect,
-    H: Coroutine<injection::Frame<HandlerIs, Ev>, Yield = HandlerEs, Return = E::Injection>,
+    H: Coroutine<injection::Frame<HandlerIs>, Yield = HandlerEs, Return = E::Injection>,
     PreEs: EffectList<Injections = PreIs> + CoprodUninjector<E, EffIndex, Remainder = PreHandleEs>,
     PreHandleEs: EffectList<Injections = PreHandleIs> + CoproductEmbedder<PostEs, EmbedIndices1>,
     HandlerEs: EffectList<Injections = HandlerIs> + CoproductEmbedder<PostEs, EmbedIndices2>,
@@ -441,11 +389,10 @@ where
             SubsetIndices1,
         > + CoproductSubsetter<HandlerIs, SubsetIndices2>,
 
-    G1: Coroutine<injection::Frame<PreIs, Ev>, Yield = PreEs, Return = R>,
-    Ev: Clone,
+    G1: Coroutine<injection::Frame<PreIs>, Yield = PreEs, Return = R>,
 {
     #[coroutine]
-    static move |frame: injection::Frame<PostIs, Ev>| {
+    static move |frame: injection::Frame<PostIs>| {
         let injection::Frame {
             injection: _,
             mut evidence,
@@ -520,14 +467,13 @@ pub fn transform0<
     EmbedIndices1,
     EmbedIndices2,
     EmbedIndices3,
-    Ev,
 >(
     g: G1,
     handler: impl FnMut(E) -> H,
-) -> impl Coroutine<injection::Frame<PostIs, Ev>, Yield = PostEs, Return = R>
+) -> impl Coroutine<injection::Frame<PostIs>, Yield = PostEs, Return = R>
 where
     E: Effect,
-    H: Coroutine<injection::Frame<HandlerIs, Ev>, Yield = HandlerEs, Return = E::Injection>,
+    H: Coroutine<injection::Frame<HandlerIs>, Yield = HandlerEs, Return = E::Injection>,
     PreEs: EffectList<Injections = PreIs> + CoprodUninjector<E, EffIndex, Remainder = PostEs>,
     HandlerEs: EffectList<Injections = HandlerIs> + CoproductEmbedder<PostEs, EmbedIndices1>,
     PostEs: EffectList<Injections = PostIs> + CoproductEmbedder<PostEs, EmbedIndices2>,
@@ -538,8 +484,7 @@ where
         + CoproductSubsetter<HandlerIs, SubsetIndices1>
         + CoproductSubsetter<PostIs, SubsetIndices2>
         + CoproductEmbedder<PreIs, EmbedIndices3>,
-    G1: Coroutine<injection::Frame<PreIs, Ev>, Yield = PreEs, Return = R>,
-    Ev: Clone,
+    G1: Coroutine<injection::Frame<PreIs>, Yield = PreEs, Return = R>,
 {
     transform(g, handler)
 }
@@ -574,19 +519,18 @@ pub fn transform1<
     EmbedIndices1,
     EmbedIndices2,
     EmbedIndices3,
-    Ev,
 >(
     g: G1,
     handler: impl FnMut(E1) -> H,
 ) -> impl Coroutine<
-    injection::Frame<Coproduct<Tagged<E2::Injection, E2>, PreHandleIs>, Ev>,
+    injection::Frame<Coproduct<Tagged<E2::Injection, E2>, PreHandleIs>>,
     Yield = Coproduct<E2, PreHandleEs>,
     Return = R,
 >
 where
     E1: Effect,
     E2: Effect,
-    H: Coroutine<injection::Frame<HandlerIs, Ev>, Yield = HandlerEs, Return = E1::Injection>,
+    H: Coroutine<injection::Frame<HandlerIs>, Yield = HandlerEs, Return = E1::Injection>,
     PreEs: EffectList<Injections = PreIs> + CoprodUninjector<E1, E1Index, Remainder = PreHandleEs>,
     PreHandleEs: EffectList<Injections = PreHandleIs>
         + CoproductEmbedder<Coproduct<E2, PreHandleEs>, EmbedIndices1>,
@@ -599,8 +543,7 @@ where
     Coproduct<Tagged<E2::Injection, E2>, PreHandleIs>: CoprodInjector<Begin, BeginIndex3>
         + CoproductSubsetter<HandlerIs, SubsetIndices1>
         + CoproductSubsetter<PreHandleIs, SubsetIndices2>,
-    G1: Coroutine<injection::Frame<PreIs, Ev>, Yield = PreEs, Return = R>,
-    Ev: Clone,
+    G1: Coroutine<injection::Frame<PreIs>, Yield = PreEs, Return = R>,
 {
     transform(g, handler)
 }

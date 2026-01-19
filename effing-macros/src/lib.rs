@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
 use syn::{
@@ -172,9 +170,9 @@ pub fn effectful(args: TokenStream, item: TokenStream) -> TokenStream {
         output,
         ..
     } = sig;
-    generics
-        .params
-        .push(parse_quote!(Evidence: ::core::clone::Clone + ::core::fmt::Debug));
+    // generics
+    //     .params
+    //     .push(parse_quote!(Evidence: ::core::clone::Clone + ::core::fmt::Debug));
     let return_type = match output {
         ReturnType::Default => quote!(()),
         ReturnType::Type(_r_arrow, ref ty) => ty.to_token_stream(),
@@ -200,16 +198,14 @@ pub fn effectful(args: TokenStream, item: TokenStream) -> TokenStream {
         fn #ident #generics(#inputs)
         -> impl ::core::ops::Coroutine<
             ::effing_mad::injection::Frame<
-                <#yield_type as ::effing_mad::injection::EffectList>::Injections,
-                Evidence
+                <#yield_type as ::effing_mad::injection::EffectList>::Injections
             >,
             Yield = #yield_type,
             Return = #return_type
         > #clone_bound {
             #[coroutine]
             #maybe_static move |frame: ::effing_mad::injection::Frame<
-                <#yield_type as ::effing_mad::injection::EffectList>::Injections,
-                Evidence
+                <#yield_type as ::effing_mad::injection::EffectList>::Injections
             >| {
                 let mut __effing_evidence = frame.evidence;
                 let _begin = frame.injection;
@@ -543,53 +539,12 @@ pub fn handler(input: TokenStream) -> TokenStream {
         PathArguments::Parenthesized(_) => panic!("stop that"),
     };
 
-    // println!("{:#?}", arms);
-    // std::process::exit(0);
-
-    // let mut arm_lambdas = HashMap::new();
-    let mut arm_lambdas = quote! {};
-    for arm in arms.clone() {
-        let eff_ty = match &arm.pat {
-            // struct name on its own gets parsed as ident
-            Pat::Ident(ident) => quote!(#ident),
-            Pat::Path(path) => quote!(#path),
-            Pat::TupleStruct(PatTupleStruct { path, .. }) => quote!(#path),
-            p => panic!("invalid pattern in handler: {p:?}"),
-        };
-        let HandlerArm { pat, mut body } = arm;
-            syn::visit_mut::visit_expr_mut(
-            &mut FixControlFlow {
-                eff_ty: &eff_ty,
-                is_shorthand,
-            },
-            &mut body,
-        );
-        let handler_lam = quote! {
-            let t = |effs: ::effing_mad::frunk::Coproduct< #eff_ty #generics , _ >| {
-                // let #pat = effs;
-                #body
-            };
-            // let t = |a: String| {
-            
-            //     #body
-            // };
-        };
-        arm_lambdas = quote! {
-            #handler_lam;
-            // #arm_lambdas;
-            // , 
-            // #eff_ty => #handler_lam
-        };
-        // arm_lambdas.insert(eff_ty.to_string(), handler_lam);
-    }
-    // let arm_lambdas = quote! { #arm_lambdas };
-
-    // println!("DEBUG: arm_lambdas = {:#?}", arm_lambdas);
-    // std::process::exit(0);
+    let mut handler_objects = Vec::new();
 
     let mut matcher = quote! { match effs {} };
     for arm in arms {
         let HandlerArm { pat, mut body } = arm;
+        let raw_body = body.clone();
         let eff_ty = match &pat {
             // struct name on its own gets parsed as ident
             Pat::Ident(ident) => quote!(#ident),
@@ -621,6 +576,25 @@ pub fn handler(input: TokenStream) -> TokenStream {
             },
             &mut body,
         );
+
+        // Build a lambda object for debugging.
+        let handler_obj = if is_shorthand {
+            quote! {
+                ::alloc::sync::Arc::new(#moveness |eff: #group| #asyncness {
+                    let #new_pat = eff;
+                    #raw_body
+                }) as ::alloc::sync::Arc<dyn ::core::any::Any + Send + Sync>
+            }
+        } else {
+            quote! {
+                ::alloc::sync::Arc::new(#moveness |eff: #eff_ty #generics| #asyncness {
+                    let #new_pat = eff;
+                    #raw_body
+                }) as ::alloc::sync::Arc<dyn ::core::any::Any + Send + Sync>
+            }
+        };
+        handler_objects.push(handler_obj);
+
         if is_shorthand {
             matcher = quote! {
                 {
@@ -652,19 +626,26 @@ pub fn handler(input: TokenStream) -> TokenStream {
     };
     quote! {
         {
-        // {
-            // #arm_lambdas;
-        // };
-            {
-                #arm_lambdas;
+            // #[cfg(feature = "alloc")]
+            let __effing_handler_sequence = {
+                let lambdas = vec![#(#handler_objects),*];
+                #[cfg(feature = "std")]
+                {
+                    ::std::println!("handler! captured {} handler lambda(s)", lambdas.len());
+                }
+                lambdas
             };
+            // #[cfg(not(feature = "alloc"))]
+            // let __effing_handler_sequence = ();
+
             #moveness |effs: #effs_ty| #asyncness {
                 let __effing_inj = #matcher;
-                // if the handler unconditionally breaks then this line is unreachable, but we
-                // don't want to see a warning for it.
                 #[allow(unreachable_code)]
                 ::core::ops::ControlFlow::<_, _>::Continue(__effing_inj)
             }
+
+            // let _ = __effing_handler_sequence;
+            
         }
     }
     .into()
